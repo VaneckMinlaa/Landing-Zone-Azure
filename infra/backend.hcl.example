@@ -1,0 +1,4 @@
+resource_group_name  = "rg-acme-tfstate-weu"
+storage_account_name = "acmetfstatexxxxxx"
+container_name       = "tfstate"
+key                  = "socle-azure.tfstate"

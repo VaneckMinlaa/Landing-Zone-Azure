@@ -1,0 +1,34 @@
+compact: true
+framework:
+  - terraform
+directory:
+  - bootstrap
+  - infra
+  - modules
+skip-check:
+  # State LRS volontaire (compte gratuit) ; GRS coûterait plus cher.
+  - CKV_AZURE_206
+  # Contact Defender : e-mail uniquement (téléphone non requis pour la démo).
+  - CKV_AZURE_20
+  # Defender Standard volontairement Free pour préserver le crédit 200 $.
+  - CKV_AZURE_19
+  - CKV_AZURE_9
+  - CKV_AZURE_10
+  - CKV_AZURE_33
+  - CKV_AZURE_35
+  - CKV_AZURE_36
+  - CKV_AZURE_43
+  - CKV_AZURE_44
+  - CKV_AZURE_59
+  - CKV_AZURE_137
+  - CKV_AZURE_160
+  - CKV2_AZURE_1
+  - CKV2_AZURE_12
+  - CKV2_AZURE_18
+  - CKV2_AZURE_21
+  - CKV2_AZURE_33
+  - CKV2_AZURE_38
+  - CKV2_AZURE_40
+  - CKV2_AZURE_41
+soft-fail: false
+download-external-modules: false
