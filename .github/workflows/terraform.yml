@@ -1,0 +1,190 @@
+name: socle-azure
+
+on:
+  pull_request:
+    paths:
+      - "bootstrap/**"
+      - "infra/**"
+      - "modules/**"
+      - ".github/workflows/terraform.yml"
+      - ".tflint.hcl"
+      - ".checkov.yaml"
+  push:
+    branches: [main]
+    paths:
+      - "bootstrap/**"
+      - "infra/**"
+      - "modules/**"
+      - ".github/workflows/terraform.yml"
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Lancer terraform apply (après validation manuelle production)"
+        type: boolean
+        default: false
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  ARM_USE_OIDC: "true"
+  ARM_CLIENT_ID: ${{ vars.ARM_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ vars.ARM_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ vars.ARM_SUBSCRIPTION_ID }}
+
+jobs:
+  validate:
+    name: fmt / tflint / checkov / plan
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.16.2"
+          terraform_wrapper: false
+
+      - name: Terraform fmt
+        run: terraform fmt -check -recursive ..
+
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: v0.55.0
+
+      - name: TFLint
+        working-directory: .
+        run: |
+          tflint --init
+          tflint --chdir=infra
+          tflint --chdir=bootstrap
+          tflint --chdir=modules/budget
+
+      - name: Checkov
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: .
+          config_file: .checkov.yaml
+          framework: terraform
+        continue-on-error: false
+
+      - name: Write tfvars from GitHub variables
+        run: |
+          cat > ci.auto.tfvars <<EOF
+          subscription_id            = "${{ vars.ARM_SUBSCRIPTION_ID }}"
+          tenant_id                  = "${{ vars.ARM_TENANT_ID }}"
+          org_name                   = "${{ vars.ORG_NAME }}"
+          location                   = "westeurope"
+          budget_start_date          = "${{ vars.BUDGET_START_DATE }}"
+          budget_alert_emails        = ["${{ vars.ALERT_EMAIL }}"]
+          security_contact_email     = "${{ vars.ALERT_EMAIL }}"
+          use_oidc                   = true
+          enable_management_groups   = false
+          enable_entra_groups        = true
+          enable_defender_standard   = false
+          enable_expensive_network   = false
+          EOF
+
+      - name: Terraform init
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=${{ vars.TFSTATE_RESOURCE_GROUP }}" \
+            -backend-config="storage_account_name=${{ vars.TFSTATE_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=${{ vars.TFSTATE_CONTAINER }}" \
+            -backend-config="key=socle-azure.tfstate"
+
+      - name: Terraform validate
+        run: terraform validate
+
+      - name: Terraform plan
+        id: plan
+        run: terraform plan -no-color -input=false -out=tfplan | tee tfplan.txt
+
+      - name: Comment plan on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('infra/tfplan.txt', 'utf8');
+            const body = `### Terraform plan (socle Azure)\n\n\`\`\`\n${plan.substring(0, 60000)}\n\`\`\``;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body && c.body.startsWith('### Terraform plan (socle Azure)'));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      - name: Upload plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: infra/tfplan
+          retention-days: 5
+
+  apply:
+    name: apply (validation manuelle)
+    needs: validate
+    if: github.event_name == 'workflow_dispatch' && inputs.apply == true
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.16.2"
+          terraform_wrapper: false
+
+      - name: Write tfvars from GitHub variables
+        run: |
+          cat > ci.auto.tfvars <<EOF
+          subscription_id            = "${{ vars.ARM_SUBSCRIPTION_ID }}"
+          tenant_id                  = "${{ vars.ARM_TENANT_ID }}"
+          org_name                   = "${{ vars.ORG_NAME }}"
+          location                   = "westeurope"
+          budget_start_date          = "${{ vars.BUDGET_START_DATE }}"
+          budget_alert_emails        = ["${{ vars.ALERT_EMAIL }}"]
+          security_contact_email     = "${{ vars.ALERT_EMAIL }}"
+          use_oidc                   = true
+          enable_management_groups   = false
+          enable_entra_groups        = true
+          enable_defender_standard   = false
+          enable_expensive_network   = false
+          EOF
+
+      - name: Terraform init
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=${{ vars.TFSTATE_RESOURCE_GROUP }}" \
+            -backend-config="storage_account_name=${{ vars.TFSTATE_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=${{ vars.TFSTATE_CONTAINER }}" \
+            -backend-config="key=socle-azure.tfstate"
+
+      - name: Terraform apply
+        run: terraform apply -auto-approve -input=false

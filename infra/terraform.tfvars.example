@@ -1,0 +1,13 @@
+subscription_id         = "00000000-0000-0000-0000-000000000000"
+tenant_id               = "00000000-0000-0000-0000-000000000000"
+org_name                = "acme"
+location                = "westeurope"
+budget_start_date       = "2026-09-01T00:00:00Z"
+budget_alert_emails     = ["toi@exemple.com"]
+security_contact_email  = "toi@exemple.com"
+use_oidc                = false
+enable_management_groups = true
+enable_entra_groups     = true
+enable_defender_standard = false
+enable_expensive_network = false
+rg_budget_amount         = 15
